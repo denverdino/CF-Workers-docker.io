@@ -1,0 +1,21 @@
+name = "docker-proxy"
+compatibility_date = "2023-12-01"
+main = "_worker.js"
+
+[vars]
+HOST_DOMAIN = "mydomain.com"
+
+routes = [
+    { pattern = "docker.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "quay.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "gcr.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "k8s-gcr.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "k8s.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "ghcr.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "cloudsmith.${HOST_DOMAIN}", custom_domain = true },
+    { pattern = "nvcr.${HOST_DOMAIN}", custom_domain = true },
+]
+
+
+[placement]
+mode = "smart"

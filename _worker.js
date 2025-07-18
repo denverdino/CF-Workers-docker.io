@@ -465,7 +465,7 @@ export default {
 						});
 					} else return fetch(new Request(env.URL, request));
 				} else	{
-					if (fakePage) return new Response(await searchInterface(), {
+					if (fakePage) return new Response(await nginx(), {
 						headers: {
 							'Content-Type': 'text/html; charset=UTF-8',
 						},
@@ -485,6 +485,11 @@ export default {
 				const newRequest = new Request(url, request);
 				return fetch(newRequest);
 			}
+		}
+
+		// Block requests that are not part of the Docker pull sequence
+		if (!url.pathname.startsWith('/v2/') && !url.pathname.startsWith('/v1/') && !url.pathname.includes('/token')) {
+			return new Response('Forbidden: Invalid request', { status: 403 });
 		}
 
 		// 修改包含 %2F 和 %3A 的请求
@@ -535,19 +540,10 @@ export default {
 				repo = v2Match[1];
 			}
 			if (repo) {
-				const tokenUrl = `${auth_url}/token?service=registry.docker.io&scope=repository:${repo}:pull`;
-				const tokenRes = await fetch(tokenUrl, {
-					headers: {
-						'User-Agent': getReqHeader("User-Agent"),
-						'Accept': getReqHeader("Accept"),
-						'Accept-Language': getReqHeader("Accept-Language"),
-						'Accept-Encoding': getReqHeader("Accept-Encoding"),
-						'Connection': 'keep-alive',
-						'Cache-Control': 'max-age=0'
-					}
-				});
-				const tokenData = await tokenRes.json();
-				const token = tokenData.token;
+				const token = await getCachedToken(repo, request, ctx);
+				if (!token) {
+					return new Response('Failed to get authentication token', { status: 502 });
+				}
 				let parameter = {
 					headers: {
 						'Host': hub_host,
@@ -642,6 +638,45 @@ export default {
 		return response;
 	}
 };
+
+async function getCachedToken(repo, request, ctx) {
+	const cache = caches.default;
+	const cacheKey = new Request(`https://docker-auth-cache/${repo}`);
+
+	let response = await cache.match(cacheKey);
+
+	if (response) {
+		console.log(`Token for ${repo} found in cache.`);
+		return response.text();
+	}
+
+	console.log(`Token for ${repo} not in cache, fetching...`);
+	const getReqHeader = (key) => request.headers.get(key);
+	const tokenUrl = `${auth_url}/token?service=registry.docker.io&scope=repository:${repo}:pull`;
+	const tokenRes = await fetch(tokenUrl, {
+		headers: {
+			'User-Agent': getReqHeader("User-Agent"),
+			'Accept': getReqHeader("Accept"),
+		}
+	});
+
+	if (!tokenRes.ok) {
+		console.error(`Failed to fetch token for ${repo}: ${tokenRes.status}`);
+		return null;
+	}
+
+	const tokenData = await tokenRes.json();
+	const token = tokenData.token;
+
+	let cacheableResponse = new Response(token, {
+		headers: {
+			'Cache-Control': 's-maxage=240' // Cache for 4 minutes
+		}
+	});
+	ctx.waitUntil(cache.put(cacheKey, cacheableResponse.clone()));
+
+	return token;
+}
 
 /**
  * 处理HTTP请求
